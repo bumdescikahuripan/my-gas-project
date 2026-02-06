@@ -182,6 +182,8 @@
 <script>
   let chart;
   let allData = [];
+  // GANTI URL INI dengan URL Web App yang Anda dapatkan saat Deploy (Langkah di pesan sebelumnya)
+  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbztRJ0QVcSI9Z5G2VnmHhIU55Ez34YVnKJDtOZaWmDOM08jy3EpLJG1YkJdCz3cWHsLqw/exec";
 
   function show(id) {
     ['sect-dashboard','sect-input','sect-laporan'].forEach(s => document.getElementById(s).style.display = 'none');
@@ -190,8 +192,22 @@
     if(id === 'laporan') loadLaporan();
   }
 
+  // Fungsi pembantu untuk mendeteksi apakah jalan di GitHub atau Google
+  function jalankanFungsi(namaFungsi, params, callback) {
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      // Jika di Google Apps Script
+      google.script.run.withSuccessHandler(callback)[namaFungsi](params);
+    } else {
+      // Jika di GitHub Pages (Menggunakan API Fetch)
+      fetch(`${WEB_APP_URL}?action=${namaFungsi}`)
+        .then(res => res.json())
+        .then(callback)
+        .catch(err => console.error("API Error:", err));
+    }
+  }
+
   function loadDashboard() {
-    google.script.run.withSuccessHandler(res => {
+    jalankanFungsi('getDashboardSummary', null, res => {
       document.getElementById('txt-masuk-global').innerText = "Rp " + res.global.masuk.toLocaleString();
       document.getElementById('txt-keluar-global').innerText = "Rp " + res.global.keluar.toLocaleString();
       document.getElementById('txt-global').innerText = "Rp " + res.laba.toLocaleString();
@@ -214,7 +230,7 @@
       }
       document.getElementById('unit-grid').innerHTML = html;
       renderChart(labels, val);
-    }).getDashboardSummary();
+    });
   }
 
   function renderChart(l, v) {
@@ -226,10 +242,10 @@
   }
 
   function loadLaporan() {
-    google.script.run.withSuccessHandler(data => {
-      allData = data.slice(1); // Simpan semua data kecuali header
+    jalankanFungsi('getDataLaporan', null, data => {
+      allData = data.slice(1);
       renderTable(allData);
-    }).getDataLaporan();
+    });
   }
 
   function renderTable(data) {
@@ -240,38 +256,55 @@
     document.getElementById('table-body').innerHTML = html;
   }
 
-  function filterLaporan() {
-    let start = document.getElementById('filter-start').value;
-    let end = document.getElementById('filter-end').value;
-    if(!start || !end) return;
+  async function submitForm() {
+    let btn = document.getElementById('btnSave');
+    let form = document.getElementById('formTrx');
+    let formData = new FormData(form);
+    let obj = Object.fromEntries(formData.entries());
 
-    let filtered = allData.filter(row => {
-      let date = new Date(row[0]).getTime();
-      return date >= new Date(start).getTime() && date <= new Date(end).getTime();
-    });
-    renderTable(filtered);
+    btn.disabled = true; 
+    btn.innerHTML = "Menyimpan...";
+
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      // Mode Google Apps Script
+      google.script.run.withSuccessHandler(handleSuccess).processForm(obj);
+    } else {
+      // Mode GitHub (POST ke Web App)
+      try {
+        const response = await fetch(WEB_APP_URL, {
+          method: 'POST',
+          body: JSON.stringify(obj)
+        });
+        const res = await response.json();
+        handleSuccess(res);
+      } catch (e) {
+        alert("Gagal Simpan ke Cloud");
+        btn.disabled = false;
+        btn.innerHTML = "SIMPAN & CETAK FAKTUR";
+      }
+    }
   }
 
-  function submitForm() {
+  function handleSuccess(res) {
     let btn = document.getElementById('btnSave');
-    btn.disabled = true; btn.innerHTML = "Menyimpan...";
-    google.script.run.withSuccessHandler(res => {
-      if(res.status === "Sukses") {
-        document.getElementById('f-nomor').innerText = res.data.nomor;
-        document.getElementById('f-tgl').innerText = res.data.tanggal;
-        document.getElementById('f-unit').innerText = res.data.unit;
-        document.getElementById('f-jenis').innerText = res.data.jenis;
-        document.getElementById('f-nominal').innerText = "Rp " + res.data.nominal.toLocaleString();
-        document.getElementById('f-ket').innerText = res.data.keterangan;
-        window.print();
-        document.getElementById('formTrx').reset();
-        btn.disabled = false; btn.innerHTML = "SIMPAN & CETAK FAKTUR";
-        show('dashboard');
-      }
-    }).processForm(document.getElementById('formTrx'));
+    if(res.status === "Sukses" || res.status === "success") {
+      document.getElementById('f-nomor').innerText = res.data.nomor;
+      document.getElementById('f-tgl').innerText = res.data.tanggal;
+      document.getElementById('f-unit').innerText = res.data.unit || document.getElementsByName('unit')[0].value;
+      document.getElementById('f-jenis').innerText = res.data.jenis || document.getElementsByName('jenis')[0].value;
+      document.getElementById('f-nominal').innerText = "Rp " + Number(res.data.nominal || document.getElementsByName('nominal')[0].value).toLocaleString();
+      document.getElementById('f-ket').innerText = res.data.keterangan || document.getElementsByName('keterangan')[0].value;
+      
+      window.print();
+      document.getElementById('formTrx').reset();
+      btn.disabled = false; 
+      btn.innerHTML = "SIMPAN & CETAK FAKTUR";
+      show('dashboard');
+    }
   }
 
   window.onload = loadDashboard;
 </script>
 </body>
 </html>
+
